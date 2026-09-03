@@ -1,0 +1,62 @@
+{
+  "compilerOptions": {
+    // Compiled output.
+    "outDir": "./dist",
+
+    // CommonJS, matching "type" in package.json. ESM + decorators +
+    // reflect-metadata is a fight you don't need; Nest itself runs CJS.
+    "module": "commonjs",
+
+    // Fixed version rather than "esnext", which shifts between compiler
+    // releases. ES2022 is what the lecture and Nest both use.
+    "target": "es2022",
+    "lib": ["es2022"],
+
+    // Without this, node:test and everything Node-shaped won't type-check.
+    // Requires @types/node installed.
+    "types": ["node"],
+
+    // Debugging and consumable output. Not required by the assignment.
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+
+    // Indexing an array yields T | undefined. Relevant here: reading
+    // design:paramtypes gives you a possibly-absent array, and this forces
+    // you to handle that rather than assume it's there.
+    "noUncheckedIndexedAccess": true,
+
+    // An optional property can be omitted but not explicitly set to
+    // undefined. Tightens the Injectable options object.
+    "exactOptionalPropertyTypes": true,
+
+    "resolveJsonModule": true,
+
+    // All strict checks on.
+    "strict": true,
+
+    // Each file must compile standalone. Good hygiene, and required by
+    // some runners.
+    "isolatedModules": true,
+
+    // Flags side-effect imports that resolve to nothing — worth having when
+    // your whole container depends on `import 'reflect-metadata'` working.
+    "noUncheckedSideEffectImports": true,
+
+    // Treat every file as a module, so top-level names don't leak globally.
+    "moduleDetection": "force",
+
+    // Skip type-checking of .d.ts files in node_modules. Faster builds.
+    "skipLibCheck": true,
+
+    // ── The two that make this assignment possible ──
+    // Enables the @ syntax at all. Without it, decorators are a syntax error.
+    "experimentalDecorators": true,
+    // Makes the compiler write design:paramtypes wherever a decorator is
+    // present. Without it everything compiles and metadata is silently empty.
+    "emitDecoratorMetadata": true
+  },
+
+  // Type-check tests too, not just src.
+  "include": ["src/**/*", "test/**/*"]
+}

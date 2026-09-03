@@ -1,0 +1,21 @@
+{
+  "name": "mini-nest",
+  "version": "1.0.0",
+  "description": "A minimal IoC container: resolves dependency graphs from TypeScript metadata",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test --require ts-node/register test/*.test.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}
