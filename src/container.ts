@@ -16,7 +16,7 @@ export class Container {
   }
 
   private resolveWithPath<T>(target: Constructor<T>, path: Constructor[]): T {
-    const metadata: InjectableMetadata | undefined = Reflect.getMetadata(
+    const metadata: InjectableMetadata | undefined = Reflect.getOwnMetadata(
       INJECTABLE_KEY,
       target,
     );
