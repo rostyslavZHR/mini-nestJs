@@ -58,5 +58,5 @@
   },
 
   // Type-check tests too, not just src.
-  "include": ["src/**/*", "test/**/*"]
+  "include": ["src/**/*", "test/**/*", "demo.ts"]
 }
