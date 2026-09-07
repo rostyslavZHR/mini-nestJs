@@ -1,3 +1,5 @@
-export const INJECT_TOKENS_KEY = Symbol("Inject decorator metadata");
-
-export const INJECTABLE_KEY = Symbol('Injectable decorator metadata');
+export const INJECT_TOKENS_KEY = Symbol("INJECT-DECORATOR-METADATA");
+export const INJECTABLE_KEY = Symbol("INJECTABLE-DECORATOR-METADATA");
+export const CONTROLLER_KEY = Symbol("CONTROLLER-DECORATOR-METADATA")
+export const ROUTE_KEY = Symbol('ROUTE-DECORATOR-METADATA')
+export const PARAM_METADATA_KEY = Symbol('PARAM-DECORATOR-METADATA')

@@ -1,2 +1,5 @@
-export * from './inject'
+export * from './controller'
 export * from './injectable'
+export * from './methods'
+export * from './inject'
+export * from './params'
