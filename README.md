@@ -86,6 +86,19 @@ class UsersController {
 startDispatcher([UsersController], 3000);
 ```
 
+Route matching prefers the most specific match, not the first declared one: a literal
+segment (`@Get('me')`) always wins over a `:param` segment (`@Get(':id')`) at the same
+position, so declaration order between them doesn't matter.
+
+`createDispatcher`/`startDispatcher` also accept an optional `Container` so providers
+can be registered before the server starts handling requests:
+
+```ts
+const container = new Container();
+container.register(CONFIG, { port: 3000 });
+startDispatcher([UsersController], 3000, container);
+```
+
 ### How a parameter decorator knows where to substitute its value
 
 `@Body()`, `@Param(name)`, and `@Query(name)` don't extract anything themselves — a parameter decorator runs once, at class-declaration time, long before any request exists. All it can do is leave a note. The compiler hands every parameter decorator `(target, propertyKey, parameterIndex)`, and `parameterIndex` is the only thing that survives to identify *which* argument this is — parameter names are erased along with everything else at compile time. So each decorator records `{ type: 'body' | 'param' | 'query', name? }` at that index, in one map keyed by index, scoped to that specific method (`target` + `propertyKey`) so two different handlers never collide.
