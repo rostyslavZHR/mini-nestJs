@@ -1,22 +1,19 @@
 import { createServer, IncomingMessage, ServerResponse, Server } from "node:http";
+import { randomUUID } from "node:crypto";
 import { Container } from "./container";
-import { Constructor, ParamMetadata } from "./types";
-import { PARAM_METADATA_KEY } from "./tokens";
+import { CanActivate, Constructor, ExecutionContext, Interceptor, NextFn, ParamMetadata } from "./types";
+import { GUARD_METADATA_KEY, INTERCEPTOR_METADATA_KEY, PARAM_METADATA_KEY } from "./tokens";
 import { router, Route } from "./router";
-import { getBodyDtoClass, validateDto } from "./pipes/validation.pipe";
+import { validateBody } from "./pipes/zod-validation.pipe";
+import { runWithRequestContext } from "./context/request-context";
+import { logStage } from "./lifecycle-log";
+import { exceptionFilter } from "./filters/exception.filter";
+import { HttpError } from "./errors/http.error";
+import { sendJson } from "./send-json";
 
 interface MatchedRoute {
   route: Route;
   params: Record<string, string>;
-}
-
-class HttpError extends Error {
-  constructor(
-    readonly statusCode: number,
-    readonly body: unknown,
-  ) {
-    super(`HTTP ${statusCode}`);
-  }
 }
 
 // Among routes matching by segment count, the one with the most literal
@@ -54,14 +51,56 @@ const matchRoute = (routes: Route[], method: string, pathname: string): MatchedR
   return best;
 };
 
-const sendJson = (res: ServerResponse, statusCode: number, body: unknown): void => {
-  res.writeHead(statusCode, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(body));
-};
-
 const getParamMap = (route: Route): Map<number, ParamMetadata> =>
   Reflect.getOwnMetadata(PARAM_METADATA_KEY, route.controller.prototype, route.property) ??
   new Map();
+
+// Controller-level and method-level @UseGuards both apply — merge, don't shadow.
+const getGuards = (route: Route): Constructor<CanActivate>[] => [
+  ...(Reflect.getOwnMetadata(GUARD_METADATA_KEY, route.controller) ?? []),
+  ...(Reflect.getOwnMetadata(GUARD_METADATA_KEY, route.controller.prototype, route.property) ?? []),
+];
+
+const runGuards = async (
+  guards: Constructor<CanActivate>[],
+  container: Container,
+  context: ExecutionContext,
+): Promise<void> => {
+  logStage("guard");
+  for (const GuardClass of guards) {
+    const guard = container.resolve(GuardClass);
+    const allowed = await guard.canActivate(context);
+    if (!allowed) {
+      throw new HttpError(403, { error: "Forbidden" });
+    }
+  }
+};
+
+const getInterceptors = (route: Route): Constructor<Interceptor>[] => [
+  ...(Reflect.getOwnMetadata(INTERCEPTOR_METADATA_KEY, route.controller) ?? []),
+  ...(Reflect.getOwnMetadata(INTERCEPTOR_METADATA_KEY, route.controller.prototype, route.property) ?? []),
+];
+
+// reduceRight wraps runHandler first, so the first interceptor in the list
+// ends up outermost.
+const runWithInterceptors = async (
+  interceptors: Constructor<Interceptor>[],
+  container: Container,
+  context: ExecutionContext,
+  runHandler: NextFn,
+): Promise<unknown> => {
+  const chain = interceptors
+    .map((InterceptorClass) => container.resolve(InterceptorClass))
+    .reduceRight<NextFn>(
+      (next, interceptor) => () => Promise.resolve(interceptor.intercept(context, next)),
+      runHandler,
+    );
+
+  logStage("interceptor:before");
+  const result = await chain();
+  logStage("interceptor:after");
+  return result;
+};
 
 const needsBody = (paramMap: Map<number, ParamMetadata>): boolean =>
   Array.from(paramMap.values()).some((meta) => meta.type === "body");
@@ -94,7 +133,6 @@ const resolveHandler = (
 
 const resolveBody = async (
   req: IncomingMessage,
-  route: Route,
   paramMap: Map<number, ParamMetadata>,
 ): Promise<unknown> => {
   if (!needsBody(paramMap)) return undefined;
@@ -107,15 +145,7 @@ const resolveBody = async (
     throw new HttpError(400, { error: "Malformed JSON body" });
   }
 
-  const dtoClass = getBodyDtoClass(route.controller, route.property, paramMap);
-  if (!dtoClass) return parsed;
-
-  const { instance: validated, errors } = await validateDto(dtoClass, parsed);
-  if (errors.length > 0) {
-    throw new HttpError(400, { errors });
-  }
-
-  return validated;
+  return validateBody(paramMap, parsed);
 };
 
 const buildArguments = (
@@ -147,31 +177,46 @@ const handleRequest = async (
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> => {
-  try {
-    const url = new URL(req.url ?? "/", "http://localhost");
-    const matched = matchRoute(routes, req.method ?? "GET", url.pathname);
-    if (!matched) {
-      throw new HttpError(404, { error: "Not Found" });
+  // ALS wraps the try/catch, not the other way round, so the filter can
+  // still read requestId back out after a throw.
+  const requestId = (req.headers["x-request-id"] as string | undefined) || randomUUID();
+  res.setHeader("X-Request-Id", requestId);
+  logStage("middleware");
+
+  await runWithRequestContext({ requestId }, async () => {
+    try {
+      const url = new URL(req.url ?? "/", "http://localhost");
+      const matched = matchRoute(routes, req.method ?? "GET", url.pathname);
+      if (!matched) {
+        throw new HttpError(404, { error: "Not Found" });
+      }
+
+      const { route, params } = matched;
+      const paramMap = getParamMap(route);
+      const { instance, handler } = resolveHandler(container, route);
+
+      const context: ExecutionContext = { req, controller: route.controller, property: route.property, params };
+
+      await runGuards(getGuards(route), container, context);
+
+      const runHandler = async (): Promise<unknown> => {
+        logStage("pipe");
+        const body = await resolveBody(req, paramMap);
+        const args = buildArguments(paramMap, params, url, body, handler);
+
+        logStage("handler");
+        return handler.apply(instance, args);
+      };
+
+      const result = await runWithInterceptors(getInterceptors(route), container, context, runHandler);
+
+      const statusCode = route.method === "POST" ? 201 : 200;
+      sendJson(res, statusCode, result);
+    } catch (error) {
+      // Still inside the ALS run, so the filter can read requestId back out.
+      exceptionFilter(error, res);
     }
-
-    const { route, params } = matched;
-    const paramMap = getParamMap(route);
-
-    const { instance, handler } = resolveHandler(container, route);
-    const body = await resolveBody(req, route, paramMap);
-    const args = buildArguments(paramMap, params, url, body, handler);
-
-    const result = await handler.apply(instance, args);
-    const statusCode = route.method === "POST" ? 201 : 200;
-    sendJson(res, statusCode, result);
-  } catch (error) {
-    if (error instanceof HttpError) {
-      sendJson(res, error.statusCode, error.body);
-      return;
-    }
-    console.error(error);
-    sendJson(res, 500, { error: "Internal Server Error" });
-  }
+  });
 };
 
 export const createDispatcher = (
