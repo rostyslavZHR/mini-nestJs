@@ -1,0 +1,26 @@
+import { ServerResponse } from "node:http";
+import { ZodError } from "zod";
+import { NotFoundError } from "../errors/not-found.error";
+import { HttpError } from "../errors/http.error";
+import { sendJson } from "../send-json";
+import { getRequestId } from "../context/request-context";
+
+export const exceptionFilter = (error: unknown, response: ServerResponse): void => {
+  if (error instanceof NotFoundError) {
+    sendJson(response, 404, { error: error.message, requestId: getRequestId() });
+    return;
+  }
+
+  if (error instanceof ZodError) {
+    sendJson(response, 400, { errors: error.issues, requestId: getRequestId() });
+    return;
+  }
+
+  if (error instanceof HttpError) {
+    sendJson(response, error.statusCode, error.body);
+    return;
+  }
+
+  console.error(error);
+  sendJson(response, 500, { error: "Internal Server Error", requestId: getRequestId() });
+};
